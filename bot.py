@@ -1,7 +1,6 @@
 import asyncio # Добавлено для запуска бота
 import os # Работа с файлами и путями
 import sqlite3 # Работа с базой данных
-import platform # Определение операционной системы для настройки ffmpeg
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
@@ -12,28 +11,34 @@ from aiogram.types import (
     FSInputFile
 ) # Импорт типов из aiogram
 
+from aiogram.types import ReplyKeyboardRemove # Импорт для удаления клавиатуры
 from aiogram.filters import CommandStart # Фильтр для команды /start
-from yt_dlp import YoutubeDL # Библиотека для скачивания аудио с YouTube
 from config import BOT_TOKEN # Импорт токена и других настроек из config.py
 from donate_menu import donate_keyboard # Импорт клавиатуры для доната из donate_menu.py
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton # Импорт типов для создания клавиатуры
 from datetime import datetime, timedelta # Работа с датой и временем
 
 from aiogram.client.session.aiohttp import AiohttpSession # Используем AiohttpSession для асинхронных запросов
+from telethon import TelegramClient # Импорт TelegramClient для userbot функционала
+from telethon.sessions import StringSession # Импорт StringSession для хранения сессии userbot в виде строки
+from config import API_ID, API_HASH, USER_SESSION # Импорт данных для Telegram userbot из config.py
 
-session = AiohttpSession() 
-bot = Bot(token=BOT_TOKEN, session=session) # Bot(token=BOT_TOKEN) 
-dp = Dispatcher() # Dispatcher(bot)
+session = AiohttpSession()  # Создаем асинхронную сессию для бота
+bot = Bot(token=BOT_TOKEN, session=session) # Инициализируем бота с токеном и сессией
+dp = Dispatcher() # Диспетчер для обработки сообщений и колбеков
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Telegram userbot
+tg_user = TelegramClient(
+    StringSession(USER_SESSION),
+    API_ID,
+    API_HASH
+) # Инициализируем TelegramClient для userbot с использованием StringSession
 
-DOWNLOAD_PATH = os.path.join(BASE_DIR, "downloads") # Папка для загрузки треков
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) # Получаем базовую директорию проекта
+
 PROFILE_PHOTO = os.path.join(BASE_DIR, "assets", "profile.jpg") # Фото для профиля (можно заменить на любое другое)
 SEARCH_VIDEO = os.path.join(BASE_DIR, "assets", "search.mp4") # Видео для анимации поиска (можно заменить на любое короткое видео)
 ADMIN_IDS = {8454715718}  # Множество ID администраторов (можно добавить несколько)
-
-if not os.path.exists(DOWNLOAD_PATH):
-    os.makedirs(DOWNLOAD_PATH)
 
 def main_menu():
     keyboard = ReplyKeyboardMarkup(
@@ -52,7 +57,7 @@ cursor = conn.cursor() # Создаем курсор для выполнения
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS tracks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    youtube_url TEXT UNIQUE,
+    query TEXT UNIQUE,
     title TEXT,
     file_id TEXT,
     download_count INTEGER DEFAULT 0
@@ -103,7 +108,7 @@ async def start_handler(message: Message):
         parse_mode="HTML"
     )
 
-@dp.message(F.text == "Профиль 👤")
+@dp.message(F.text == "Профиль 👤", F.chat.type == "private")
 async def profile_handler(message: Message):
 
     user_id = message.from_user.id
@@ -227,25 +232,17 @@ async def search_handler(message: Message):
     if text.startswith("/") or text in ["Профиль 👤", "Донат 🍩"]:
         return
 
-    ydl_opts = {
-        "quiet": True,
-        "extract_flat": True,
-        "skip_download": True
-    }
-
     try:
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"ytsearch15:{text}", download=False)
+        inline_results = await tg_user.inline_query("lybot", text)
 
-        results = info.get("entries", [])
-
-        if not results:
+        if not inline_results:
             await message.answer("Ничего не найдено")
             return
 
+        results = inline_results[:7]
+
         search_cache[message.from_user.id] = {
-            "results": results,
-            "page": 0
+            "results": results
         }
 
         keyboard = build_keyboard(message.from_user.id)
@@ -253,115 +250,78 @@ async def search_handler(message: Message):
         global SEARCH_VIDEO_ID
 
         if SEARCH_VIDEO_ID:
-            loading_msg = await message.answer_video(
+            msg = await message.answer_video(
                 video=SEARCH_VIDEO_ID,
                 caption="🎧 <b>Ищем треки...</b>",
                 parse_mode="HTML"
             )
         else:
             video = FSInputFile(SEARCH_VIDEO)
-            msg = await message.answer_video(
+            sent = await message.answer_video(
                 video=video,
                 caption="🎧 <b>Ищем треки...</b>",
                 parse_mode="HTML"
             )
-            SEARCH_VIDEO_ID = msg.video.file_id
-            loading_msg = msg
+            SEARCH_VIDEO_ID = sent.video.file_id
+            msg = sent
 
-        await loading_msg.edit_caption(
+        await msg.edit_caption(
             caption="🎵 <b>Выбери трек:</b>",
             reply_markup=keyboard,
             parse_mode="HTML"
+       )
+
+        # УБИРАЕМ главное меню
+        await message.answer(
+            "Выберите трек из списка выше 👆",
+            reply_markup=ReplyKeyboardRemove()
         )
 
     except Exception as e:
-        await message.answer("Ошибка поиска")
         print("SEARCH ERROR:", e)
+        await message.answer("Ошибка поиска")
 
 def build_keyboard(user_id):
 
     data = search_cache[user_id]
     results = data["results"]
-    page = data["page"]
-
-    start = page * 5
-    end = start + 5
-    current_tracks = results[start:end]
+    current_tracks = results[:7]
 
     buttons = []
 
     for i, entry in enumerate(current_tracks):
-        title = entry.get("title", "Без названия")
+        title = entry.title if entry.title else "Без названия"
         buttons.append([
             InlineKeyboardButton(
                 text=title[:50],
-                callback_data=f"track_{start + i}"
+                callback_data=f"track_{i}"
             )
         ])
 
-    nav_buttons = []
-
-    if page > 0:
-        nav_buttons.append(
-            InlineKeyboardButton(text="⬅️", callback_data="prev_page")
-        )
-
-    if end < len(results):
-        nav_buttons.append(
-            InlineKeyboardButton(text="➡️", callback_data="next_page")
-        )
-
-    if nav_buttons:
-        buttons.append(nav_buttons)
-
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-@dp.callback_query(F.data == "next_page")
-async def next_page(callback: CallbackQuery):
-
-    user_id = callback.from_user.id
-
-    if user_id not in search_cache:
-        await callback.answer("Поиск устарел", show_alert=True)
-        return
-
-    data = search_cache[user_id]
-
-    if (data["page"] + 1) * 5 >= len(data["results"]):
-        await callback.answer("Это последнее окно", show_alert=True)
-        return
-
-    data["page"] += 1
-
-    await callback.message.edit_reply_markup(
-        reply_markup=build_keyboard(user_id)
+def increase_usage(user_id, query=None):
+    cursor.execute(
+        """
+        UPDATE users
+        SET daily_count = daily_count + 1,
+            total_downloads = total_downloads + 1
+        WHERE user_id = ?
+        """,
+        (user_id,)
     )
 
-    await callback.answer()
+    if query:
+        cursor.execute(
+            """
+            UPDATE tracks
+            SET download_count = download_count + 1
+            WHERE query = ?
+            """,
+            (query,)
+        )
 
-
-@dp.callback_query(F.data == "prev_page")
-async def prev_page(callback: CallbackQuery):
-
-    user_id = callback.from_user.id
-
-    if user_id not in search_cache:
-        await callback.answer("Поиск устарел", show_alert=True)
-        return
-
-    data = search_cache[user_id]
-
-    if data["page"] == 0:
-        await callback.answer("Это первое окно", show_alert=True)
-        return
-
-    data["page"] -= 1
-
-    await callback.message.edit_reply_markup(
-        reply_markup=build_keyboard(user_id)
-    )
-
-    await callback.answer()
+    conn.commit()
 
 # ===== ОБРАБОТКА ВЫБОРА =====
 @dp.callback_query(F.data.startswith("track_"))
@@ -388,92 +348,87 @@ async def download_track(callback: CallbackQuery):
         await callback.message.answer("Трек недоступен")
         return
 
-    entry = results[index]
-    url = entry["url"]
-    title = entry.get("title", "Track")
+    selected_result = results[index]
 
-    # ===== RAM
-    if url in track_cache:
+    query = selected_result.title
+    performer = selected_result.description if selected_result.description else ""
+
+    # RAM
+    if query in track_cache:
+        file_id = track_cache[query]
+
         await callback.message.answer_audio(
-            audio=track_cache[url],
-            caption='Скачать трек [здесь](https://t.me/ElizCityBot)',
-            parse_mode="Markdown"
+            audio=file_id,
+            title=query,
+            performer=performer,
+            caption="🎵 @ElizCityBot"
         )
-        increase_usage(user_id, url)
+        increase_usage(user_id, query)
         return
 
-    # ===== БД
-    cursor.execute("SELECT file_id FROM tracks WHERE youtube_url = ?", (url,))
+    # БД
+    cursor.execute("SELECT file_id FROM tracks WHERE query = ?", (query,))
     row = cursor.fetchone()
 
     if row:
         file_id = row[0]
-        track_cache[url] = file_id
+        track_cache[query] = file_id
 
         await callback.message.answer_audio(
             audio=file_id,
-            caption='Скачать трек [здесь](https://t.me/ElizCityBot)',
-            parse_mode="Markdown"
+            title=query,
+            performer="Eliz Music",
+            caption="🎵 @ElizCityBot",
         )
-        increase_usage(user_id, url)
+        increase_usage(user_id, query)
         return
 
-    # ===== СКАЧИВАНИЕ
-    ydl_opts = {
-        "format": "bestaudio",
-        "outtmpl": f"{DOWNLOAD_PATH}/%(title)s.%(ext)s",
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "max_filesize": 30_000_000,
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "128",
-        }],
-    }
-
-    if platform.system() == "Windows":
-        ydl_opts["ffmpeg_location"] = "C:/ffmpeg/bin"
-
+    # TELEGRAM CLICK — чисто через бота
     try:
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            file_path = ydl.prepare_filename(info).rsplit(".", 1)[0] + ".mp3"
-    except Exception as e:
-        print("DOWNLOAD ERROR:", e)
-        await callback.message.answer("Ошибка загрузки")
-        return
+        selected = results[index]
 
-    try:
-        from aiogram.types import FSInputFile
+        # Кликаем в избранное (НЕ в чат)
+        message = await selected.click(entity="me")
 
-        audio = FSInputFile(file_path)
+        if not message:
+            await callback.message.answer("Не удалось получить файл")
+            return
 
-        msg = await callback.message.answer_audio(
-            audio=audio,
-            caption='Скачать трек [здесь](https://t.me/ElizCityBot)',
-            parse_mode="Markdown",
-            title=title
+        # Скачиваем в память
+        file_bytes = await message.download_media(bytes)
+
+        # Удаляем из избранного
+        await message.delete()
+
+        if not file_bytes:
+            await callback.message.answer("Ошибка загрузки файла")
+            return
+
+        from aiogram.types import BufferedInputFile
+
+        audio_file = BufferedInputFile(file_bytes, filename="track.mp3")
+
+        bot_msg = await bot.send_audio(
+            chat_id=callback.message.chat.id,
+            audio=audio_file,
+            title=query,
+            performer=performer,
+            caption="🎵 @ElizCityBot"
         )
+
+        # Сохраняем file_id для быстрого повторного использования
+        cursor.execute(
+            "INSERT OR IGNORE INTO tracks (query, title, file_id) VALUES (?, ?, ?)",
+            (query, query, bot_msg.audio.file_id)
+        )
+        conn.commit()
+
+        track_cache[query] = bot_msg.audio.file_id
+        increase_usage(user_id, query)
+
     except Exception as e:
-        print("SEND AUDIO ERROR:", e)
-        await callback.message.answer("Ошибка отправки")
-        return
-
-    file_id = msg.audio.file_id
-
-    cursor.execute(
-        "INSERT OR IGNORE INTO tracks (youtube_url, title, file_id) VALUES (?, ?, ?)",
-        (url, title, file_id)
-    )
-    conn.commit()
-
-    track_cache[url] = file_id
-    increase_usage(user_id, url)
-
-    if os.path.exists(file_path):
-        os.remove(file_path)
+        print("TG ERROR:", e)
+        await callback.message.answer("Ошибка поиска трека")
 
 from datetime import datetime, timedelta # Импорт для работы с датой и временем
 
@@ -520,35 +475,11 @@ def check_limit(user_id):
 
 conn.commit()
 
-def increase_usage(user_id, url=None):
-
-    cursor.execute(
-        """
-        UPDATE users
-        SET daily_count = daily_count + 1,
-            total_downloads = total_downloads + 1
-        WHERE user_id = ?
-        """,
-        (user_id,)
-    )
-
-    if url:
-        cursor.execute(
-            """
-            UPDATE tracks
-            SET download_count = download_count + 1
-            WHERE youtube_url = ?
-            """,
-            (url,)
-        )
-
-    conn.commit()
-
 # ===== ЗАПУСК =====
 async def warmup_cache():
 
     cursor.execute("""
-        SELECT youtube_url, file_id
+        SELECT query, file_id
         FROM tracks
     """)
 
@@ -564,10 +495,14 @@ async def main():
 
     await warmup_cache()
 
+    # запуск userbot
+    await tg_user.start()
+
     try:
         await dp.start_polling(bot)
     finally:
         await bot.session.close()
+        await tg_user.disconnect()
 
 if __name__ == "__main__":
     asyncio.run(main())
