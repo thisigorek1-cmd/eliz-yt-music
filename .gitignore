@@ -1,0 +1,4 @@
+tracks.db
+downloads/
+__pycache__/
+.env
