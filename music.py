@@ -210,17 +210,19 @@ def register_music_handlers(dp: Dispatcher, bot: Bot):
 
         # проверяем премиум
         is_premium = False
+
         if premium_until:
             if datetime.fromisoformat(premium_until) > datetime.now():
                 is_premium = True
 
-        limit = 10 if is_premium else 3
+        FREE_LIMIT = 3
 
-        if daily_count >= limit:
+        # 🚫 лимит только для бесплатных
+        if not is_premium and daily_count >= FREE_LIMIT:
             conn.close()
             await callback.message.answer(
-                "❌ <b>Вы достигли лимита.</b>\n\n"
-                "Оформите <b>Premium 👑</b> чтобы скачивать 10 треков в день.",
+                "🚫 <b>Лимит бесплатных треков — 3 в день</b>\n\n"
+                "⭐ Premium снимает все ограничения.",
                 parse_mode="HTML"
             )
             return

@@ -14,7 +14,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from config import BOT_TOKEN
 from database import init_db
 from music import register_music_handlers, tg_user, warmup_cache
-from donate import register_donate_handlers, donate_keyboard
+from donate import register_donate_handlers
 from auto_top import scheduler
 from admin import router as admin_router
 
@@ -98,16 +98,16 @@ async def main():
 
             if premium_date > now:
                 status = "Premium 👑"
-                limit = 10
+                limit_text = "♾️"
 
                 days_left = (premium_date.date() - now.date()).days
                 remaining_text = f"\n\n⏳ До конца Premium осталось: {days_left} д."
             else:
                 status = "Бесплатный"
-                limit = 3
+                limit_text = f"{daily_count}/3"
         else:
             status = "Бесплатный"
-            limit = 3
+            limit_text = f"{daily_count}/3"
 
         conn.close()
 
@@ -120,7 +120,7 @@ async def main():
                 f"🥷🏻 Имя: {name}\n"
                 f"🆔 ID: {user_id}\n\n"
                 f"📌 Статус: {status}\n"
-                f"🎵 Лимит треков сегодня: {daily_count}/{limit}\n\n"
+                f"🎵 лимит треков сегодня {limit_text}\n\n"
                 f"🔥 Всего треков найдено вами: {total_downloads}"
                 f"{remaining_text}"
             ),
