@@ -41,8 +41,31 @@ async def main():
     dp = Dispatcher()
 
     # ===== /start =====
+    from database import get_sql
+
     @dp.message(CommandStart())
     async def start_handler(message: Message):
+
+        user_id = message.from_user.id
+        today = datetime.now().date()
+
+        conn = get_sql()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+        user = cursor.fetchone()
+
+        if not user:
+            cursor.execute(
+                "INSERT INTO users (user_id, daily_count, last_reset, total_downloads) VALUES (?, 0, ?, 0)",
+                (user_id, str(today))
+            )
+            conn.commit()
+
+            print(f"NEW USER: {user_id}")
+
+        conn.close()
+
         await message.answer(
             "🎵 <b>Привет, я Eliz Music!</b>\n\n"
             "Найду тебе любой трек с YouTube.\n"
