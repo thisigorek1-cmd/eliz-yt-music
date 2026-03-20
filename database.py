@@ -2,20 +2,16 @@
 import sqlite3 
 from config import DB_PATH
 
-# =========================
 # CONNECTION
-# =========================
 def get_sql():
     return sqlite3.connect(DB_PATH, check_same_thread=False)
 
-# =========================
 # INIT DB
-# =========================
 def init_db():
     conn = get_sql()
     cursor = conn.cursor()
 
-    # ===== TRACKS =====
+    # TRACKS 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tracks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,7 +22,7 @@ def init_db():
         )
     """)
 
-    # ===== USERS =====
+    #USERS
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -50,9 +46,7 @@ def init_db():
     conn.commit()
     conn.close()
 
-# =========================
 # TRACK FUNCTIONS
-# =========================
 def get_track(query):
     conn = get_sql()
     cur = conn.cursor()
@@ -98,9 +92,7 @@ def get_all_tracks():
     conn.close()
     return rows
 
-# =========================
 # USER FUNCTIONS
-# =========================
 def get_user(user_id):
     conn = get_sql()
     cur = conn.cursor()
