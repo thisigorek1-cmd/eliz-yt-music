@@ -171,11 +171,7 @@ def register_music_handlers(dp: Dispatcher, bot: Bot):
     @dp.callback_query(F.data.startswith("track_"))
     async def download_track(callback: CallbackQuery):
 
-        # Отвечаем мгновенно
-        try:
-            await callback.answer()
-        except:
-            pass
+        await callback.answer("⏳ Загружаю...")
 
         user_id = callback.from_user.id
 
@@ -301,13 +297,18 @@ def register_music_handlers(dp: Dispatcher, bot: Bot):
 
         # ===== TELEGRAM CLICK =====
         try:
+            await callback.message.answer("🔍 Ищу трек...")
+
             tg_msg = await selected_result.click(entity="me")
 
             if not tg_msg or not tg_msg.document:
                 await callback.message.answer("Не удалось получить файл")
                 return
 
+            await callback.message.answer("⬇️ Скачиваю трек...")
+
             file_bytes = await tg_user.download_media(tg_msg, bytes)
+            
             await tg_msg.delete()
 
             if not file_bytes:
